@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <android/log.h>
-#include <dobby.h> // You will need to add Dobby to your project
+#include <dobby.h> // Standalone hooking framework
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ForceCloseOreUI", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ForceCloseOreUI", __VA_ARGS__)
@@ -28,11 +28,28 @@ public:
     std::unordered_map<std::string, OreUIConfig> mConfigs;
 };
 
-// Hardcoded paths to bypass the JNI/JavaVM race condition
+// --- Dynamically detect package name without JNI ---
+std::string getPackageName() {
+    std::ifstream cmdline("/proc/self/cmdline");
+    std::string pkgName;
+    
+    // In Android, the first null-terminated string in cmdline is the package name
+    if (std::getline(cmdline, pkgName, '\0') && !pkgName.empty()) {
+        return pkgName;
+    }
+    
+    // Fallback to official just in case
+    return "com.mojang.minecraftpe"; 
+}
+
 std::string getConfigDir() {
-    std::string primary = "/storage/emulated/0/Android/data/com.mojang.minecraftpe/files/mods/ForceCloseOreUI/";
+    std::string pkgName = getPackageName();
+    
+    // Dynamically inject the detected package name into the path
+    std::string primary = "/storage/emulated/0/Android/data/" + pkgName + "/files/mods/ForceCloseOreUI/";
+    
     std::error_code ec;
-    fs::create_directories(primary, ec);
+    fs::create_directories(primary, ec); // The 'ec' prevents fatal filesystem crashes
     return primary;
 }
 
@@ -42,15 +59,21 @@ std::string filePath = "";
 bool updated = false;
 
 void saveJson(const std::string &path, const nlohmann::json &j) {
-    fs::create_directories(fs::path(path).parent_path());
+    std::error_code ec;
+    // Safely attempt to create directories without throwing exceptions
+    fs::create_directories(fs::path(path).parent_path(), ec);
+    
     FILE *f = std::fopen(path.c_str(), "w");
-    if (!f) return;
+    if (!f) {
+        LOGE("Failed to open config file for writing. Check Android storage permissions.");
+        return;
+    }
     std::string jsonStr = j.dump(4);
     std::fwrite(jsonStr.data(), 1, jsonStr.size(), f);
     std::fclose(f);
 }
 
-// Store the original function
+// Original function pointer for the hook
 void (*orig_OreUi_init)(void*, void*, void*, void*, void*, void*, void*, void*, void*, OreUi&, void*);
 
 // Our Dobby Hook replacement
