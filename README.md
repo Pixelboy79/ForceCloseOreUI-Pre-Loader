@@ -1,65 +1,39 @@
-<p align="right">
-  <b>Language: <a href="README.zh.md">简体中文</a></b>
-</p>
+# ForceCloseOreUI (Standalone / Snail Edition)
 
-# ForceCloseOreUI
+A native C++ library for Minecraft Bedrock Edition designed to force-close the new OreUI interface. This is highly useful for bypassing UI-related crashes and identifying conflicting mods within your load order.
 
-A handy utility to force close the Minecraft OreUI.
+This specific fork has been **completely rewritten** to strip out all Levi Launcher and `libpreloader.so` dependencies. It is now a fully standalone `.so` library optimized for raw memory injection via the **Snail Method**.
 
----
+## 🚀 Key Features
 
-## How to Use
+* **Snail Method Compatible:** Injects perfectly as a standalone library without triggering `UnsatisfiedLinkError` crashes.
+* **No Levi Environment Required:** Completely removes `libGlossHook.a` and the LiteLDev preloader dependencies.
+* **Safe Background Polling:** Utilizes a background thread to safely wait for `libminecraftpe.so` to unpack, preventing race conditions and segmentation faults during early injection.
+* **Dobby Hook Integration:** Replaced static macro hooks with standard inline hooking via [Dobby](https://github.com/jmpews/Dobby).
+* **Hardcoded JNI Bypass:** Bypasses JavaVM lookups to ensure the config file saves correctly regardless of when the mod is injected.
 
-### 🖥️ Windows
+## 📂 Configuration
 
-#### 1. Download the Latest DLL
+Once injected, the mod will automatically generate a configuration file at the following path:
+`/storage/emulated/0/Android/data/com.mojang.minecraftpe/files/mods/ForceCloseOreUI/config.json`
 
-- Go to the [Releases page](https://github.com/QYCottage/ForceCloseOreUI/releases) to download the latest `.dll` file.
+You can edit this JSON file to toggle specific UI elements on or off.
 
-#### 2. Installation
+## 🛠️ Building the Project
 
-- **If you are using [QYCottage/mc-w10-version-launcher](https://github.com/QYCottage/mc-w10-version-launcher):**
+This project uses `xmake` and has a fully automated GitHub Actions CI/CD pipeline. 
 
-  1. After downloading the desired Minecraft version via the launcher, open the game folder.
-  2. Locate the `mods` folder and place the `.dll` file inside.
-  3. Configuration file location:
-     ```
-     mods/ForceCloseOreUI/config.json
-     ```
+### Automated Build (Recommended)
+You do not need to install the Android NDK locally. 
+1. Fork or push your code to GitHub.
+2. The GitHub Actions workflow will automatically download the Dobby dependencies, compile the code for `arm64-v8a`, and upload the standalone `libForceCloseOreUI.so` to the **Actions** tab.
 
-- **If you use an injector or another launcher:**
-  1. Configuration file location:
-     ```
-     C:\Users\[user name]\AppData\Local\Packages\Microsoft.MinecraftUWP_8wekyb3d8bbwe\AC\mods\ForceCloseOreUI
-     ```
+### Manual Local Build
+If you prefer to compile locally, ensure you have the Android NDK (r26b recommended) and `xmake` installed.
 
----
+```bash
+# Configure the project for Android (Accept the prompt to install Dobby)
+xmake f -p android --ndk=/path/to/your/android-ndk -a arm64-v8a -c --yes
 
-### 📱 Android
-
-#### 1. Download the Latest SO File
-
-- Go to the [Releases page](https://github.com/QYCottage/ForceCloseOreUI/releases) to download the latest `.so` file.
-
-#### 2. Installation
-
-- **If you are using [LeviLauncher](https://github.com/LiteLDev/LeviLaunchroid):**
-  1. Download the `.so` file.
-  2. Tap the file and choose to open with LeviLauncher for import.
-  3. Configuration file location:
-     ```
-     /storage/emulated/0/Android/data/[minecraft package name]/mods/ForceCloseOreUI
-     ```
-     > **Note:** Modified APK files are NOT provided.
-
----
-
-## 📢 Discord Community
-
-Join our Discord community for support and discussion!
-
-[![Join Discord](https://img.shields.io/discord/8nGcV8QkKZ?logo=discord&style=for-the-badge&label=Discord)](https://discord.gg/8nGcV8QkKZ)
-
----
-
-> Thank you for your support and for using our tool!
+# Compile the project
+xmake
