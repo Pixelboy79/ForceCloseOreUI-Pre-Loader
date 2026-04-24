@@ -1,47 +1,39 @@
-name: Build
+name: Build ForceCloseOreUI
 
 on:
   push:
-  pull_request:
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      matrix:
+        target: 
+          - arm64-v8a
+    runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup xmake
-        uses: xmake-io/github-action-setup-xmake@v1
-
-      - name: Build for Windows (DLL)
-        run: |
-          xmake f -p windows -m release -v -y
-          xmake
-
-      - name: Upload DLL
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: build/windows/x64/release/*.dll
-
-  build-android:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup xmake
-        uses: xmake-io/github-action-setup-xmake@v1
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build for Android (SO)
-        run: |
-          xmake f -p android -a arm64-v8a -m release -v -y
-          xmake
-
-      - name: Upload SO
-        uses: actions/upload-artifact@v4
-        with:
-          name: android
-          path: build/android/arm64-v8a/release/*.so
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r26b # Recommended NDK version for stable Dobby builds
+        
+    - name: Setup Xmake
+      uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: latest
+        
+    - name: Configure and Build
+      run: |
+        # The --yes flag tells Xmake to automatically download and build Dobby without pausing
+        xmake f -p android --ndk=${{ steps.setup-ndk.outputs.ndk-path }} -a ${{ matrix.target }} -c --yes
+        xmake
+        
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ForceCloseOreUI-${{ matrix.target }}
+        path: build/android/${{ matrix.target }}/release/libForceCloseOreUI.so
