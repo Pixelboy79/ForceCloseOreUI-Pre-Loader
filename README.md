@@ -37,3 +37,12 @@ xmake f -p android --ndk=/path/to/your/android-ndk -a arm64-v8a -c --yes
 
 # Compile the project
 xmake
+
+
+## 📜 Credits & Copyright
+
+**© 2026 Pixelboypro** — *Standalone Snail Method Conversion, Levi Launcher/Preloader Dependency Removal, and Dobby Hook Integration.*
+
+* Original concept, core logic, and OreUI memory signatures created by **QYCottage / yinghuajimew / stivusik**. 
+
+Permission is granted to use, modify, and distribute the standalone modifications provided that the above copyright notice and author credits are included in all copies or substantial portions of the software.
