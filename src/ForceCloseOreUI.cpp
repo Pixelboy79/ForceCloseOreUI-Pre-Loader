@@ -2,269 +2,186 @@
 #include <fstream>
 #include <functional>
 #include <nlohmann/json.hpp>
-#include <set>
-#include <string>
 #include <unordered_map>
-
-#include "api/memory/Hook.h"
-#include <cstdio>
-
-namespace fs = std::filesystem;
-#if _WIN32
-
-#include <shlobj.h>
 #include <string>
 #include <vector>
-#include <windows.h>
-
-#endif
-
-#if __arm__
+#include <pthread.h>
 #include <unistd.h>
-extern "C" int __wrap_getpagesize() { return sysconf(_SC_PAGESIZE); }
-
-#endif
-
-#if __arm__ || __aarch64__
-#include "jni.h"
 #include <android/log.h>
+#include <dobby.h> // You will need to add Dobby to your project
 
-JNIEnv *env = nullptr;
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ForceCloseOreUI", __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ForceCloseOreUI", __VA_ARGS__)
 
-#define LOGI(...)                                                              \
-  __android_log_print(ANDROID_LOG_INFO, "LeviLogger", __VA_ARGS__)
-
-jobject getGlobalContext(JNIEnv *env) {
-  jclass activity_thread = env->FindClass("android/app/ActivityThread");
-  jmethodID current_activity_thread =
-      env->GetStaticMethodID(activity_thread, "currentActivityThread",
-                             "()Landroid/app/ActivityThread;");
-  jobject at =
-      env->CallStaticObjectMethod(activity_thread, current_activity_thread);
-  jmethodID get_application = env->GetMethodID(
-      activity_thread, "getApplication", "()Landroid/app/Application;");
-  jobject context = env->CallObjectMethod(at, get_application);
-  if (env->ExceptionCheck())
-    env->ExceptionClear();
-  return context;
-}
-
-std::string getAbsolutePath(JNIEnv *env, jobject file) {
-  jclass file_class = env->GetObjectClass(file);
-  jmethodID get_abs_path =
-      env->GetMethodID(file_class, "getAbsolutePath", "()Ljava/lang/String;");
-  auto jstr = (jstring)env->CallObjectMethod(file, get_abs_path);
-  if (env->ExceptionCheck())
-    env->ExceptionClear();
-  const char *cstr = env->GetStringUTFChars(jstr, nullptr);
-  std::string result(cstr);
-  env->ReleaseStringUTFChars(jstr, cstr);
-  return result;
-}
-
-std::string getPackageName(JNIEnv *env, jobject context) {
-  jclass context_class = env->GetObjectClass(context);
-  jmethodID get_pkg_name =
-      env->GetMethodID(context_class, "getPackageName", "()Ljava/lang/String;");
-  auto jstr = (jstring)env->CallObjectMethod(context, get_pkg_name);
-  if (env->ExceptionCheck())
-    env->ExceptionClear();
-  const char *cstr = env->GetStringUTFChars(jstr, nullptr);
-  std::string result(cstr);
-  env->ReleaseStringUTFChars(jstr, cstr);
-  return result;
-}
-
-std::string getInternalStoragePath(JNIEnv *env) {
-  jclass env_class = env->FindClass("android/os/Environment");
-  jmethodID get_storage_dir = env->GetStaticMethodID(
-      env_class, "getExternalStorageDirectory", "()Ljava/io/File;");
-  jobject storage_dir = env->CallStaticObjectMethod(env_class, get_storage_dir);
-  return getAbsolutePath(env, storage_dir);
-}
-
-std::string GetModsFilesPath(JNIEnv *env) {
-  jobject app_context = getGlobalContext(env);
-  if (!app_context) {
-    return "";
-  }
-  auto package_name = getPackageName(env, app_context);
-  for (auto &c : package_name)
-    c = tolower(c);
-
-  return (fs::path(getInternalStoragePath(env)) / "Android" / "data" /
-          package_name / "mods");
-}
-
-SKY_AUTO_STATIC_HOOK(
-    Hook1, memory::HookPriority::Normal,
-    std::initializer_list<const char *>(
-        {"? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? "
-         "91 ? ? ? D5 ? ? ? F9 ? ? ? F8 ? ? ? 39 ? ? ? 34 ? ? ? 12"}),
-    int, void *_this, JavaVM *vm) {
-
-  vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_4);
-  return origin(_this, vm);
-}
-
-#endif
+namespace fs = std::filesystem;
 
 class OreUIConfig {
 public:
-  void *mUnknown1;
-  void *mUnknown2;
-  std::function<bool()> mUnknown3;
-  std::function<bool()> mUnknown4;
+    void *mUnknown1;
+    void *mUnknown2;
+    std::function<bool()> mUnknown3;
+    std::function<bool()> mUnknown4;
 };
 
 class OreUi {
 public:
-  std::unordered_map<std::string, OreUIConfig> mConfigs;
+    std::unordered_map<std::string, OreUIConfig> mConfigs;
 };
 
-// clang-format off
-#if __arm__
-#define OREUI_PATTERN 
-   {""}
-
-#elif __aarch64__
-#define OREUI_PATTERN                                                                     \
-     std::initializer_list<const char *>({                                                \
-      "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA", \
-      "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA", \
-      "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA", \
-      "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F6 03 07 AA", \
-      "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA" \
-  })                                                                                                                    \
-
-#elif _WIN32
-
-#include <shlobj.h>
-#include <string>
-#include <vector>
-#include <windows.h>
-
-
-#define OREUI_PATTERN                                                                                                    \
-     std::initializer_list<const char *>({                                                                               \
-    "40 53 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 68 48 8B 05 ? ? ? ? 48 33 C4 48 89 44 24 ? 49 8B E9 4C 89 44 24 ? 4C 8B EA 48 8B F9 48 89 4C 24", \
-    "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 18 02 00 00 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 49 8B F1 4C 89 44 24", \
-    "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC B8 01 00 00 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 49 8B F1 4C 89 44 24", \
-    "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 98 01 00 00 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 4D 8B F1 4C 89 44 24" \
-  })                                                                                                 \
-
- #endif
-
-// clang-format on
-
-namespace {
-
-#if defined(_WIN32)
-
-std::string getMinecraftModsPath() {
-  char appDataPath[MAX_PATH];
-  if (FAILED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
-    printf("Failed to get APPDATA path.\n");
-    return "";
-  }
-
-  std::string path = std::string(appDataPath) + "\\Minecraft Bedrock\\mods";
-  return path;
-}
-
-std::string getUWPModsDir() {
-  std::string appDataPath = getMinecraftModsPath();
-  std::string uwpMods = appDataPath + "\\ForceCloseOreUI\\";
-  return uwpMods;
-}
-#endif
-
-bool testDirWritable(const std::string &dir) {
-  std::error_code _;
-  std::filesystem::create_directories(dir, _);
-  std::string testFile = dir + "._perm_test";
-  std::ofstream ofs(testFile);
-  bool ok = ofs.is_open();
-  ofs.close();
-  if (ok)
-    std::filesystem::remove(testFile, _);
-  return ok;
-}
-
+// Hardcoded paths to bypass the JNI/JavaVM race condition
 std::string getConfigDir() {
-#if defined(_WIN32)
-  std::string primary = "mods/ForceCloseOreUI/";
-  std::string fallback = getUWPModsDir();
-  if (testDirWritable(fallback))
-    return fallback;
-  return primary;
-#else
-  std::string primary = "/sdcard/games";
-  if (!primary.empty()) {
-    primary += "/ForceCloseOreUI/";
-    if (testDirWritable(primary))
-      return primary;
-  }
-  if (!env)
+    std::string primary = "/storage/emulated/0/Android/data/com.mojang.minecraftpe/files/mods/ForceCloseOreUI/";
+    std::error_code ec;
+    fs::create_directories(primary, ec);
     return primary;
-  std::string base = GetModsFilesPath(env);
-  if (!base.empty()) {
-    base += "/ForceCloseOreUI/";
-    if (testDirWritable(base))
-      return base;
-  }
-  return primary;
-#endif
 }
+
 nlohmann::json outputJson;
 std::string dirPath = "";
-std::string filePath = dirPath + "config.json";
+std::string filePath = "";
 bool updated = false;
 
 void saveJson(const std::string &path, const nlohmann::json &j) {
-  std::filesystem::create_directories(
-      std::filesystem::path(path).parent_path());
-  FILE *f = std::fopen(path.c_str(), "w");
-  if (!f) {
-    throw std::runtime_error(path);
-  }
-  std::string jsonStr = j.dump(4);
-  std::fwrite(jsonStr.data(), 1, jsonStr.size(), f);
-  std::fclose(f);
+    fs::create_directories(fs::path(path).parent_path());
+    FILE *f = std::fopen(path.c_str(), "w");
+    if (!f) return;
+    std::string jsonStr = j.dump(4);
+    std::fwrite(jsonStr.data(), 1, jsonStr.size(), f);
+    std::fclose(f);
 }
 
-SKY_AUTO_STATIC_HOOK(Hook2, memory::HookPriority::Normal, OREUI_PATTERN, void,
-                     void *a1, void *a2, void *a3, void *a4, void *a5, void *a6,
-                     void *a7, void *a8, void *a9, OreUi &a10, void *a11) {
-  dirPath = getConfigDir();
-  filePath = dirPath + "config.json";
+// Store the original function
+void (*orig_OreUi_init)(void*, void*, void*, void*, void*, void*, void*, void*, void*, OreUi&, void*);
 
-  if (std::filesystem::exists(filePath)) {
-    std::ifstream inFile(filePath);
-    inFile >> outputJson;
-    inFile.close();
-  }
+// Our Dobby Hook replacement
+void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7, void *a8, void *a9, OreUi &a10, void *a11) {
+    dirPath = getConfigDir();
+    filePath = dirPath + "config.json";
 
-  for (auto &data : a10.mConfigs) {
-
-    bool value = false;
-    if (outputJson.contains(data.first) &&
-        outputJson[data.first].is_boolean()) {
-      value = outputJson[data.first];
-    } else {
-
-      outputJson[data.first] = false;
-      updated = true;
+    if (fs::exists(filePath)) {
+        std::ifstream inFile(filePath);
+        if (inFile.is_open()) {
+            inFile >> outputJson;
+            inFile.close();
+        }
     }
-    data.second.mUnknown3 = [value]() { return value; };
-    data.second.mUnknown4 = [value]() { return value; };
-  }
 
-  if (updated || !std::filesystem::exists(filePath)) {
-    saveJson(filePath, outputJson);
-  }
+    for (auto &data : a10.mConfigs) {
+        bool value = false;
+        if (outputJson.contains(data.first) && outputJson[data.first].is_boolean()) {
+            value = outputJson[data.first];
+        } else {
+            outputJson[data.first] = false;
+            updated = true;
+        }
+        data.second.mUnknown3 = [value]() { return value; };
+        data.second.mUnknown4 = [value]() { return value; };
+    }
 
-  origin(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+    if (updated || !fs::exists(filePath)) {
+        saveJson(filePath, outputJson);
+    }
+
+    orig_OreUi_init(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
-} // namespace
+// --- STANDALONE SCANNER & POLLING LOOP ---
+const std::vector<const char*> OREUI_PATTERNS = {
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
+    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F6 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA"
+};
+
+static uintptr_t ResolveSignature(const char* sig) {
+    std::vector<int> pattern;
+    const char* p = sig;
+    while (*p) {
+        if (*p == ' ') { p++; continue; }
+        if (*p == '?') { pattern.push_back(-1); p++; if(*p=='?') p++; continue; }
+        pattern.push_back(strtol(p, nullptr, 16));
+        p += 2;
+    }
+
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) return 0;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        if (!strstr(line, "libminecraftpe.so") || !strstr(line, "r-x")) continue; 
+        
+        uintptr_t start, end;
+        if (sscanf(line, "%lx-%lx", &start, &end) != 2) continue;
+
+        uint8_t* scan_base = (uint8_t*)start;
+        size_t size = end - start;
+        if (size < pattern.size()) continue;
+
+        for (size_t i = 0; i < size - pattern.size(); i++) {
+            bool found = true;
+            for (size_t j = 0; j < pattern.size(); j++) {
+                if (pattern[j] != -1 && scan_base[i + j] != pattern[j]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) {
+                fclose(fp);
+                return (uintptr_t)(scan_base + i);
+            }
+        }
+    }
+    fclose(fp);
+    return 0;
+}
+
+void* InjectionThread(void* arg) {
+    LOGI("ForceCloseOreUI thread started. Waiting for libminecraftpe.so...");
+
+    bool isLoaded = false;
+    while (!isLoaded) {
+        FILE* fp = fopen("/proc/self/maps", "r");
+        if (fp) {
+            char line[512];
+            while (fgets(line, sizeof(line), fp)) {
+                if (strstr(line, "libminecraftpe.so") && strstr(line, "r-x")) {
+                    isLoaded = true;
+                    break;
+                }
+            }
+            fclose(fp);
+        }
+        if (!isLoaded) usleep(500000); 
+    }
+
+    LOGI("libminecraftpe.so is mapped! Polling for OreUI signatures...");
+
+    bool hookApplied = false;
+    for (int attempts = 1; attempts <= 40; attempts++) {
+        for (const char* sig : OREUI_PATTERNS) {
+            uintptr_t addr = ResolveSignature(sig);
+            if (addr != 0) {
+                LOGI("Found OreUI signature! Applying DobbyHook...");
+                DobbyHook((void*)addr, (void*)hook_OreUi_init, (void**)&orig_OreUi_init);
+                hookApplied = true;
+                break;
+            }
+        }
+        if (hookApplied) break;
+        sleep(1); 
+    }
+
+    if (!hookApplied) {
+        LOGE("Failed to find any OreUI signatures after 40 seconds. You may need to update them for your Minecraft version.");
+    }
+
+    return nullptr;
+}
+
+__attribute__((constructor))
+void ForceCloseOreUI_Init() {
+    pthread_t thread;
+    pthread_create(&thread, nullptr, InjectionThread, nullptr);
+    pthread_detach(thread);
+}
