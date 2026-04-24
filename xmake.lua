@@ -1,10 +1,7 @@
 add_rules("mode.debug", "mode.release")
 
-add_repositories("liteldev-repo https://github.com/LiteLDev/xmake-repo.git")
 if is_plat("windows") then
     add_requires("detours v4.0.1-xmake.1")
-elseif is_plat("android") then   
-    add_requires("preloader_android 0.1.18")
 end
 add_requires("nlohmann_json v3.11.3")
 
@@ -24,6 +21,6 @@ target("ForceCloseOreUI")
     elseif is_plat("android") then
         remove_files("src/api/memory/win/**.cpp","src/api/memory/win/**.h")
         add_cxflags("-O3")
-        add_packages("preloader_android")
+        -- Preloader requirement completely removed
         add_cxxflags("-DLLVM_TARGETS_TO_BUILD=\"ARM;AArch64;BPF\"")
-    end
+end
