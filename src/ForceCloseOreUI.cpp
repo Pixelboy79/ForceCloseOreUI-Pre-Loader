@@ -108,7 +108,7 @@ void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6,
     orig_OreUi_init(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
-// --- STANDALONE SCANNER & POLLING LOOP ---
+// --- STANDALONE SCANNER & POLLING LOOP 26.20 Support ARM64---
 const std::vector<const char*> OREUI_PATTERNS = {
     "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA",
     "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
