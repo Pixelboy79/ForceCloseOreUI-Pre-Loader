@@ -32,24 +32,17 @@ public:
 std::string getPackageName() {
     std::ifstream cmdline("/proc/self/cmdline");
     std::string pkgName;
-    
-    // In Android, the first null-terminated string in cmdline is the package name
     if (std::getline(cmdline, pkgName, '\0') && !pkgName.empty()) {
         return pkgName;
     }
-    
-    // Fallback to official just in case
     return "com.mojang.minecraftpe"; 
 }
 
 std::string getConfigDir() {
     std::string pkgName = getPackageName();
-    
-    // Dynamically inject the detected package name into the path
     std::string primary = "/storage/emulated/0/Android/data/" + pkgName + "/files/mods/ForceCloseOreUI/";
-    
     std::error_code ec;
-    fs::create_directories(primary, ec); // The 'ec' prevents fatal filesystem crashes
+    fs::create_directories(primary, ec); 
     return primary;
 }
 
@@ -60,9 +53,7 @@ bool updated = false;
 
 void saveJson(const std::string &path, const nlohmann::json &j) {
     std::error_code ec;
-    // Safely attempt to create directories without throwing exceptions
     fs::create_directories(fs::path(path).parent_path(), ec);
-    
     FILE *f = std::fopen(path.c_str(), "w");
     if (!f) {
         LOGE("Failed to open config file for writing. Check Android storage permissions.");
@@ -76,7 +67,6 @@ void saveJson(const std::string &path, const nlohmann::json &j) {
 // Original function pointer for the hook
 void (*orig_OreUi_init)(void*, void*, void*, void*, void*, void*, void*, void*, void*, OreUi&, void*);
 
-// Our Dobby Hook replacement
 void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7, void *a8, void *a9, OreUi &a10, void *a11) {
     dirPath = getConfigDir();
     filePath = dirPath + "config.json";
@@ -108,7 +98,14 @@ void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6,
     orig_OreUi_init(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
-
+// --- 1.26.20 ARM64 Signatures ---
+const std::vector<const char*> OREUI_PATTERNS = {
+    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
+    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA",
+    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F6 03 07 AA"
+};
 
 static uintptr_t ResolveSignature(const char* sig) {
     std::vector<int> pattern;
@@ -127,22 +124,7 @@ static uintptr_t ResolveSignature(const char* sig) {
     while (fgets(line, sizeof(line), fp)) {
         if (!strstr(line, "libminecraftpe.so") || !strstr(line, "r-x")) continue; 
         
-        uintpt// --- 1.26.20 ARM64 Signatures ---
-const std::vector<const char*> OREUI_PATTERNS = {
-    // 1.26.20 (Brand New Pattern - Starts with SUB)
-    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
-    
-    // 1.26.10 (Older Pattern - Starts with STP)
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA",
-    
-    // 1.26.00 (Older Pattern)
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
-    
-    // Legacy Fallbacks
-    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA",
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F6 03 07 AA"
-};
-r_t start, end;
+        uintptr_t start, end;
         if (sscanf(line, "%lx-%lx", &start, &end) != 2) continue;
 
         uint8_t* scan_base = (uint8_t*)start;
@@ -168,8 +150,9 @@ r_t start, end;
 }
 
 void* InjectionThread(void* arg) {
-    LOGI("ForceCloseOreUI thread started. Waiting for libminecraftpe.so...");
+    LOGI("ForceCloseOreUI Turbo Thread started.");
 
+    // Aggressive polling: 10ms instead of 500ms
     bool isLoaded = false;
     while (!isLoaded) {
         FILE* fp = fopen("/proc/self/maps", "r");
@@ -183,28 +166,29 @@ void* InjectionThread(void* arg) {
             }
             fclose(fp);
         }
-        if (!isLoaded) usleep(500000); 
+        if (!isLoaded) usleep(10000); 
     }
 
-    LOGI("libminecraftpe.so is mapped! Polling for OreUI signatures...");
+    LOGI("libminecraftpe.so mapped! Scanning memory instantly...");
 
     bool hookApplied = false;
-    for (int attempts = 1; attempts <= 40; attempts++) {
+    // Aggressive scanning: No sleep between attempts
+    for (int attempts = 1; attempts <= 100; attempts++) {
         for (const char* sig : OREUI_PATTERNS) {
             uintptr_t addr = ResolveSignature(sig);
             if (addr != 0) {
-                LOGI("Found OreUI signature! Applying DobbyHook...");
+                LOGI("SUCCESS: Found OreUI signature! Applying DobbyHook...");
                 DobbyHook((void*)addr, (void*)hook_OreUi_init, (void**)&orig_OreUi_init);
                 hookApplied = true;
                 break;
             }
         }
         if (hookApplied) break;
-        sleep(1); 
+        usleep(50000); // Wait 50ms instead of 1 full second
     }
 
     if (!hookApplied) {
-        LOGE("Failed to find any OreUI signatures after 40 seconds. You may need to update them for your Minecraft version.");
+        LOGE("FATAL: Could not find OreUI pattern in memory.");
     }
 
     return nullptr;
