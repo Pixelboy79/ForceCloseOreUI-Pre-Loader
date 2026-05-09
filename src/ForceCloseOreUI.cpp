@@ -8,13 +8,15 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <android/log.h>
-#include <dobby.h> // Standalone hooking framework
+#include <dobby.h>
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ForceCloseOreUI", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ForceCloseOreUI", __VA_ARGS__)
+#define LOG_TAG "ForceCloseOreUI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace fs = std::filesystem;
 
+// --- Minecraft Classes ---
 class OreUIConfig {
 public:
     void *mUnknown1;
@@ -28,7 +30,7 @@ public:
     std::unordered_map<std::string, OreUIConfig> mConfigs;
 };
 
-// --- Dynamically detect package name without JNI ---
+// --- Utilities ---
 std::string getPackageName() {
     std::ifstream cmdline("/proc/self/cmdline");
     std::string pkgName;
@@ -38,165 +40,161 @@ std::string getPackageName() {
     return "com.mojang.minecraftpe"; 
 }
 
-std::string getConfigDir() {
-    std::string pkgName = getPackageName();
-    std::string primary = "/storage/emulated/0/Android/data/" + pkgName + "/files/mods/ForceCloseOreUI/";
+std::string getConfigPath() {
+    // Android 11+ uses /Android/data/pkg/files as a safe bet for native mods
+    std::string path = "/sdcard/Android/data/" + getPackageName() + "/files/mods/ForceCloseOreUI/";
     std::error_code ec;
-    fs::create_directories(primary, ec); 
-    return primary;
-}
-
-nlohmann::json outputJson;
-std::string dirPath = "";
-std::string filePath = "";
-bool updated = false;
-
-void saveJson(const std::string &path, const nlohmann::json &j) {
-    std::error_code ec;
-    fs::create_directories(fs::path(path).parent_path(), ec);
-    FILE *f = std::fopen(path.c_str(), "w");
-    if (!f) {
-        LOGE("Failed to open config file for writing. Check Android storage permissions.");
-        return;
+    if (!fs::exists(path, ec)) {
+        fs::create_directories(path, ec);
     }
-    std::string jsonStr = j.dump(4);
-    std::fwrite(jsonStr.data(), 1, jsonStr.size(), f);
-    std::fclose(f);
+    return path + "config.json";
 }
 
-// Original function pointer for the hook
+// --- Hook Logic ---
 void (*orig_OreUi_init)(void*, void*, void*, void*, void*, void*, void*, void*, void*, OreUi&, void*);
 
-void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7, void *a8, void *a9, OreUi &a10, void *a11) {
-    dirPath = getConfigDir();
-    filePath = dirPath + "config.json";
+void hook_OreUi_init(void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7, void *a8, void *a9, OreUi &oreUi, void *a11) {
+    // Call original first so the map is populated by the game
+    orig_OreUi_init(a1, a2, a3, a4, a5, a6, a7, a8, a9, oreUi, a11);
 
+    std::string filePath = getConfigPath();
+    nlohmann::json config;
+    bool needsSave = false;
+
+    // Load existing config
     if (fs::exists(filePath)) {
-        std::ifstream inFile(filePath);
-        if (inFile.is_open()) {
-            inFile >> outputJson;
-            inFile.close();
+        try {
+            std::ifstream inFile(filePath);
+            inFile >> config;
+        } catch (...) {
+            LOGE("Failed to parse config.json, resetting.");
         }
     }
 
-    for (auto &data : a10.mConfigs) {
+    // Apply overrides
+    for (auto &entry : oreUi.mConfigs) {
+        const std::string& name = entry.first;
         bool value = false;
-        if (outputJson.contains(data.first) && outputJson[data.first].is_boolean()) {
-            value = outputJson[data.first];
+
+        if (config.contains(name) && config[name].is_boolean()) {
+            value = config[name];
         } else {
-            outputJson[data.first] = false;
-            updated = true;
+            config[name] = false; // Default to false (Force Close)
+            needsSave = true;
         }
-        data.second.mUnknown3 = [value]() { return value; };
-        data.second.mUnknown4 = [value]() { return value; };
+
+        // Overwrite the lambdas
+        entry.second.mUnknown3 = [value]() { return value; };
+        entry.second.mUnknown4 = [value]() { return value; };
     }
 
-    if (updated || !fs::exists(filePath)) {
-        saveJson(filePath, outputJson);
+    if (needsSave) {
+        std::ofstream outFile(filePath);
+        if (outFile.is_open()) {
+            outFile << config.dump(4);
+            LOGI("Config updated and saved to: %s", filePath.c_str());
+        }
     }
-
-    orig_OreUi_init(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
-// --- 1.26.20 ARM64 Signatures ---
-const std::vector<const char*> OREUI_PATTERNS = {
-    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F5 03 07 AA",
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
-    "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA",
-    "? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 FD 03 00 91 ? ? ? D1 ? ? ? D5 FA 03 00 AA F6 03 07 AA"
+// --- Pattern Scanning ---
+struct MemoryRegion {
+    uintptr_t start;
+    uintptr_t end;
 };
 
-static uintptr_t ResolveSignature(const char* sig) {
-    std::vector<int> pattern;
-    const char* p = sig;
-    while (*p) {
-        if (*p == ' ') { p++; continue; }
-        if (*p == '?') { pattern.push_back(-1); p++; if(*p=='?') p++; continue; }
-        pattern.push_back(strtol(p, nullptr, 16));
-        p += 2;
-    }
-
+std::vector<MemoryRegion> getLibraryRegions(const char* libName) {
+    std::vector<MemoryRegion> regions;
     FILE* fp = fopen("/proc/self/maps", "r");
-    if (!fp) return 0;
+    if (!fp) return regions;
 
     char line[512];
     while (fgets(line, sizeof(line), fp)) {
-        if (!strstr(line, "libminecraftpe.so") || !strstr(line, "r-x")) continue; 
-        
-        uintptr_t start, end;
-        if (sscanf(line, "%lx-%lx", &start, &end) != 2) continue;
-
-        uint8_t* scan_base = (uint8_t*)start;
-        size_t size = end - start;
-        if (size < pattern.size()) continue;
-
-        for (size_t i = 0; i < size - pattern.size(); i++) {
-            bool found = true;
-            for (size_t j = 0; j < pattern.size(); j++) {
-                if (pattern[j] != -1 && scan_base[i + j] != pattern[j]) {
-                    found = false;
-                    break;
-                }
-            }
-            if (found) {
-                fclose(fp);
-                return (uintptr_t)(scan_base + i);
-            }
+        if (strstr(line, libName) && strstr(line, "r-x")) {
+            uintptr_t start, end;
+            sscanf(line, "%lx-%lx", &start, &end);
+            regions.push_back({start, end});
         }
     }
     fclose(fp);
-    return 0;
+    return regions;
 }
 
-void* InjectionThread(void* arg) {
-    LOGI("ForceCloseOreUI Turbo Thread started.");
-
-    // Aggressive polling: 10ms instead of 500ms
-    bool isLoaded = false;
-    while (!isLoaded) {
-        FILE* fp = fopen("/proc/self/maps", "r");
-        if (fp) {
-            char line[512];
-            while (fgets(line, sizeof(line), fp)) {
-                if (strstr(line, "libminecraftpe.so") && strstr(line, "r-x")) {
-                    isLoaded = true;
-                    break;
-                }
-            }
-            fclose(fp);
+uintptr_t FindPattern(uintptr_t start, uintptr_t end, const char* pattern) {
+    std::vector<int> bytes;
+    const char* p = pattern;
+    while (*p) {
+        if (*p == ' ') { p++; continue; }
+        if (*p == '?') {
+            bytes.push_back(-1);
+            p += (*(p+1) == '?') ? 2 : 1;
+            continue;
         }
-        if (!isLoaded) usleep(10000); 
+        bytes.push_back((int)strtol(p, nullptr, 16));
+        p += 2;
     }
 
-    LOGI("libminecraftpe.so mapped! Scanning memory instantly...");
+    const uint8_t* scanStart = reinterpret_cast<const uint8_t*>(start);
+    const size_t scanLen = end - start;
+    const size_t patternLen = bytes.size();
 
-    bool hookApplied = false;
-    // Aggressive scanning: No sleep between attempts
-    for (int attempts = 1; attempts <= 100; attempts++) {
-        for (const char* sig : OREUI_PATTERNS) {
-            uintptr_t addr = ResolveSignature(sig);
-            if (addr != 0) {
-                LOGI("SUCCESS: Found OreUI signature! Applying DobbyHook...");
-                DobbyHook((void*)addr, (void*)hook_OreUi_init, (void**)&orig_OreUi_init);
-                hookApplied = true;
+    for (size_t i = 0; i <= scanLen - patternLen; ++i) {
+        bool match = true;
+        for (size_t j = 0; j < patternLen; ++j) {
+            if (bytes[j] != -1 && scanStart[i + j] != bytes[j]) {
+                match = false;
                 break;
             }
         }
-        if (hookApplied) break;
-        usleep(50000); // Wait 50ms instead of 1 full second
+        if (match) return reinterpret_cast<uintptr_t>(&scanStart[i]);
+    }
+    return 0;
+}
+
+// --- Initialization ---
+void* MainThread(void*) {
+    LOGI("Thread started. Waiting for libminecraftpe.so...");
+
+    std::vector<MemoryRegion> regions;
+    while (regions.empty()) {
+        regions = getLibraryRegions("libminecraftpe.so");
+        if (regions.empty()) usleep(100000); // 100ms
     }
 
-    if (!hookApplied) {
-        LOGE("FATAL: Could not find OreUI pattern in memory.");
+    LOGI("Library found. Scanning for OreUI...");
+
+    const std::vector<const char*> patterns = {
+        "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? D5 FB 03 00 AA F5 03 07 AA",
+        "? ? ? D1 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? A9 ? ? ? 91 ? ? ? F9 ? ? ? D5 FB 03 00 AA ? ? ? F9 F5 03 07 AA"
+    };
+
+    uintptr_t targetAddr = 0;
+    for (int i = 0; i < 50; i++) { // Max 50 attempts
+        for (const auto& region : regions) {
+            for (const char* sig : patterns) {
+                targetAddr = FindPattern(region.start, region.end, sig);
+                if (targetAddr) break;
+            }
+            if (targetAddr) break;
+        }
+        if (targetAddr) break;
+        usleep(200000); // Wait 200ms
+    }
+
+    if (targetAddr) {
+        LOGI("OreUI found at %p. Applying Hook...", (void*)targetAddr);
+        DobbyHook((void*)targetAddr, (void*)hook_OreUi_init, (void**)&orig_OreUi_init);
+        LOGI("Hook applied successfully.");
+    } else {
+        LOGE("Failed to find OreUI pattern after multiple attempts.");
     }
 
     return nullptr;
 }
 
 __attribute__((constructor))
-void ForceCloseOreUI_Init() {
+void Init() {
     pthread_t thread;
-    pthread_create(&thread, nullptr, InjectionThread, nullptr);
+    pthread_create(&thread, nullptr, MainThread, nullptr);
     pthread_detach(thread);
 }
